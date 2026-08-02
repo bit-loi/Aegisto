@@ -1,0 +1,2 @@
+# rustfmt configuration for the Aegisto workspace.
+max_width = 100

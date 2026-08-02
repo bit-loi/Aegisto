@@ -1,0 +1,7 @@
+# Cargo configuration for the Aegisto workspace.
+#
+# Shared build settings live here so every contributor builds the same way.
+#
+# Example — faster incremental builds:
+#   [build]
+#   codegen-units = 16

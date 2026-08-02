@@ -7,7 +7,7 @@ pub fn extract_strings(data: &[u8], min_len: usize) -> Vec<StringMatch> {
     let mut start_offset = 0;
 
     for (i, &byte) in data.iter().enumerate() {
-        if byte >= 0x20 && byte <= 0x7e {
+        if (0x20..=0x7e).contains(&byte) {
             if current.is_empty() {
                 start_offset = i;
             }

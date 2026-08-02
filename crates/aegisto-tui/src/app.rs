@@ -2,8 +2,7 @@
 //! static-analysis pipeline behind `:analyze`, and the main event loop.
 
 use std::{
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -13,14 +12,14 @@ use crossterm::{
     cursor::Show,
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, widgets::ListState, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend, widgets::ListState};
 
-use crate::analysis::{disasm, parser, strings};
-use crate::types::AnalysisResult;
-use crate::ui::format::{format_modified, format_size};
-use crate::ui::{input, render, splash};
+use crate::format::{format_modified, format_size};
+use crate::{input, render, splash};
+use aegisto_core::analysis::{disasm, parser, strings};
+use aegisto_core::types::AnalysisResult;
 
 /// Maximum number of instructions to disassemble during `:analyze`.
 const MAX_INSTRUCTIONS: usize = 2000;
@@ -151,10 +150,10 @@ impl App {
             format!("Modified: {}", format_modified(file.modified)),
             format!("Type: {}", if file.is_dir { "folder" } else { "file" }),
         ];
-        if !file.is_dir {
-            if let Some(ext) = file.path.extension() {
-                lines.push(format!("Extension: {}", ext.to_string_lossy()));
-            }
+        if !file.is_dir
+            && let Some(ext) = file.path.extension()
+        {
+            lines.push(format!("Extension: {}", ext.to_string_lossy()));
         }
         lines.push("─".repeat(34));
         if file.is_dir {
@@ -364,11 +363,13 @@ impl App {
                     strings: extracted,
                 });
                 self.add_log("[OK] analysis complete — type ':export' for report.json".to_string());
-                self.status_message = "[OK] analysis complete — type ':export' for report.json".to_string();
+                self.status_message =
+                    "[OK] analysis complete — type ':export' for report.json".to_string();
             }
             Err(e) => {
                 self.add_log(format!("[ERR] analysis failed: {e}"));
-                self.status_message = "[ERR] analysis failed — is this a valid PE/ELF binary?".to_string();
+                self.status_message =
+                    "[ERR] analysis failed — is this a valid PE/ELF binary?".to_string();
             }
         }
     }
@@ -428,7 +429,7 @@ impl Drop for ScreenGuard {
 }
 
 /// Run the TUI: splash, terminal setup and the main event loop.
-pub(crate) fn run() -> Result<()> {
+pub fn run() -> Result<()> {
     // Animated splash (4s, press q to skip; auto-skipped when output is piped).
     match splash::run()? {
         splash::SplashOutcome::Aborted => std::process::exit(130),
@@ -456,16 +457,14 @@ pub(crate) fn run() -> Result<()> {
 
         terminal.draw(|f| render::draw(f, &mut app))?;
 
-        if event::poll(std::time::Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                if app.input_mode {
-                    input::handle_input_key(&mut app, key);
-                } else {
-                    input::handle_nav_key(&mut app, key);
-                }
+        if event::poll(std::time::Duration::from_millis(50))?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            if app.input_mode {
+                input::handle_input_key(&mut app, key);
+            } else {
+                input::handle_nav_key(&mut app, key);
             }
         }
     }

@@ -8,17 +8,17 @@
 //! - Press `Ctrl+C` to abort the run (the terminal is always restored).
 
 use std::fmt::Write as _;
-use std::io::{stdin, stdout, IsTerminal, Write};
+use std::io::{IsTerminal, Write, stdin, stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::cursor::{Hide, MoveTo, Show};
-use crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyModifiers, poll, read};
 use crossterm::execute;
 use crossterm::style::{Color, SetForegroundColor};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, size, Clear, ClearType, EnterAlternateScreen,
-    LeaveAlternateScreen,
+    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode, size,
 };
 
 /// How long the splash stays on screen before the CLI starts.
@@ -117,10 +117,10 @@ fn splash_inner() -> Result<SplashOutcome> {
         let since_last = last_frame.elapsed();
         if since_last < FRAME_DURATION {
             let wait = FRAME_DURATION.saturating_sub(since_last);
-            if poll(wait)? {
-                if let Some(outcome) = handle_key(read()?)? {
-                    return Ok(outcome);
-                }
+            if poll(wait)?
+                && let Some(outcome) = handle_key(read()?)?
+            {
+                return Ok(outcome);
             }
             continue;
         }
@@ -166,15 +166,9 @@ fn draw_frame(
                 buf.push(' ');
                 continue;
             }
-            let brightness =
-                wave_brightness(col as f32, row as f32, elapsed.as_secs_f32());
+            let brightness = wave_brightness(col as f32, row as f32, elapsed.as_secs_f32());
             let (r, g, b) = shade(brightness);
-            write!(
-                buf,
-                "{}{}",
-                SetForegroundColor(Color::Rgb { r, g, b }),
-                ch
-            )?;
+            write!(buf, "{}{}", SetForegroundColor(Color::Rgb { r, g, b }), ch)?;
         }
     }
 
@@ -184,14 +178,22 @@ fn draw_frame(
         buf,
         "{}{}{}",
         MoveTo(tag_x as u16, tag_y as u16),
-        SetForegroundColor(Color::Rgb { r: tr, g: tg, b: tb }),
+        SetForegroundColor(Color::Rgb {
+            r: tr,
+            g: tg,
+            b: tb
+        }),
         TAGLINE
     )?;
     write!(
         buf,
         "{}{}{}",
         MoveTo(0, rows.saturating_sub(1)),
-        SetForegroundColor(Color::Rgb { r: tr, g: tg, b: tb }),
+        SetForegroundColor(Color::Rgb {
+            r: tr,
+            g: tg,
+            b: tb
+        }),
         HINT
     )?;
 
@@ -206,7 +208,7 @@ fn handle_key(event: Event) -> Result<Option<SplashOutcome>> {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return Ok(Some(SplashOutcome::Skipped)),
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(Some(SplashOutcome::Aborted))
+                return Ok(Some(SplashOutcome::Aborted));
             }
             _ => {}
         }

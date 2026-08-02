@@ -1,0 +1,8 @@
+[package]
+name = "aegisto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aegisto-tui = { path = "../../crates/aegisto-tui" }
+anyhow.workspace = true

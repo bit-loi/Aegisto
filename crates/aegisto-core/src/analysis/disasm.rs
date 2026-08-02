@@ -11,17 +11,15 @@ pub fn disassemble(
     base_va: u64,
     max_instructions: usize,
 ) -> Result<Vec<InstructionInfo>> {
-    let bitness = if base_va > 0xFFFF_FFFF {
-        64
-    } else {
-        32
-    };
+    let bitness = if base_va > 0xFFFF_FFFF { 64 } else { 32 };
 
     let mut decoder = Decoder::with_ip(bitness, code_bytes, base_va, DecoderOptions::NONE);
 
     let mut formatter = IntelFormatter::new();
     formatter.options_mut().set_uppercase_mnemonics(false);
-    formatter.options_mut().set_space_after_operand_separator(true);
+    formatter
+        .options_mut()
+        .set_space_after_operand_separator(true);
     formatter.options_mut().set_rip_relative_addresses(true);
 
     let mut results = Vec::new();

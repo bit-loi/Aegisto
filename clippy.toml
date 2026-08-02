@@ -1,0 +1,4 @@
+# clippy configuration for the Aegisto workspace.
+#
+# Example — allow a lint project-wide:
+#   allow = ["too_many_arguments"]

@@ -1,0 +1,10 @@
+[package]
+name = "aegisto-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+goblin = "0.10"
+iced-x86 = { version = "1.21", features = ["std", "intel", "masm", "nasm", "gas", "fast_fmt"] }
+serde.workspace = true

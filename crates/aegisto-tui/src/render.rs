@@ -2,15 +2,15 @@
 //! monochrome grays with a single blue accent.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::app::App;
-use crate::ui::format::{format_size, truncate};
+use crate::format::{format_size, truncate};
 
 // Grok-style palette: pure grays + one blue accent.
 const ACCENT: Color = Color::Rgb(100, 149, 237); // cornflower blue
@@ -42,9 +42,7 @@ pub(crate) fn draw(f: &mut Frame<'_>, app: &mut App) {
     let brand = Paragraph::new(Line::from(vec![
         Span::styled(
             "AEGISTO",
-            Style::default()
-                .fg(ACCENT)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "  ·  v0.1.0-alpha  ·  binary AI agent",
@@ -71,14 +69,12 @@ pub(crate) fn draw(f: &mut Frame<'_>, app: &mut App) {
         .map(|entry| {
             let name = truncate(&entry.name, 30);
             let style = if entry.is_dir {
-                Style::default()
-                    .fg(ACCENT)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
             } else {
                 match entry.path.extension().and_then(|e| e.to_str()) {
-                    Some("exe") | Some("elf") | Some("bin") | Some("dll") => Style::default()
-                        .fg(OK)
-                        .add_modifier(Modifier::BOLD),
+                    Some("exe") | Some("elf") | Some("bin") | Some("dll") => {
+                        Style::default().fg(OK).add_modifier(Modifier::BOLD)
+                    }
                     Some("rs") | Some("toml") | Some("md") | Some("json") => {
                         Style::default().fg(WARN)
                     }
@@ -151,12 +147,7 @@ pub(crate) fn draw(f: &mut Frame<'_>, app: &mut App) {
         "':' for commands · '?' for menu · 'q' quit".to_string()
     };
     let input_bar = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "⟩ ",
-            Style::default()
-                .fg(TEXT)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("⟩ ", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
         Span::styled(input_content, input_style),
     ]))
     .block(
@@ -168,13 +159,22 @@ pub(crate) fn draw(f: &mut Frame<'_>, app: &mut App) {
 
     // === 4. FOOTER (hotkeys left · status right) ===
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled("↑/↓", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "↑/↓",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" navigate   ", Style::default().fg(DIM)),
-        Span::styled("Enter", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Enter",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" open   ", Style::default().fg(DIM)),
         Span::styled(":", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
         Span::styled(" command   ", Style::default().fg(DIM)),
-        Span::styled("Ctrl+C", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Ctrl+C",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" quit", Style::default().fg(DIM)),
     ]));
     f.render_widget(footer, chunks[3]);
@@ -211,7 +211,7 @@ pub(crate) fn draw(f: &mut Frame<'_>, app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 
     fn render_app(app: &mut App) -> Buffer {
         let backend = TestBackend::new(120, 36);

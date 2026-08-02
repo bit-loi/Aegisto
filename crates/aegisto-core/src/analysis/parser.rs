@@ -15,8 +15,8 @@ pub struct ParsedBinary {
 }
 
 pub fn parse_file(path: &Path) -> Result<ParsedBinary> {
-    let data = std::fs::read(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    let data =
+        std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
 
     match Object::parse(&data).context("Failed to parse binary format")? {
         Object::Elf(elf) => parse_elf(&elf, &data),
@@ -59,14 +59,15 @@ fn parse_elf(elf: &goblin::elf::Elf, _data: &[u8]) -> Result<ParsedBinary> {
         .filter(|sym| !sym.is_import())
         .filter_map(|sym| {
             let name = elf.dynstrtab.get_at(sym.st_name)?.to_string();
-            let library = elf.libraries.first().map(|s| s.to_string()).unwrap_or_default();
+            let library = elf
+                .libraries
+                .first()
+                .map(|s| s.to_string())
+                .unwrap_or_default();
             if name.is_empty() {
                 return None;
             }
-            Some(ImportInfo {
-                name,
-                library,
-            })
+            Some(ImportInfo { name, library })
         })
         .collect();
 
