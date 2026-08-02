@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
 goblin = "0.10"
 iced-x86 = { version = "1.21", features = ["std", "intel", "masm", "nasm", "gas", "fast_fmt"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,5 +1,6 @@
 mod disasm;
 mod parser;
+mod splash;
 mod strings;
 mod types;
 
@@ -25,6 +26,10 @@ struct Cli {
     /// Maximum number of instructions to disassemble (default: 500)
     #[arg(long, default_value_t = 500)]
     max_instructions: usize,
+
+    /// Skip the animated splash screen shown at startup
+    #[arg(long)]
+    no_splash: bool,
 }
 
 fn main() {
@@ -36,6 +41,14 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // Animated splash before the actual analysis (skipped when stdout is piped).
+    if !cli.no_splash {
+        match splash::run()? {
+            splash::SplashOutcome::Aborted => std::process::exit(130),
+            splash::SplashOutcome::Skipped | splash::SplashOutcome::Completed => {}
+        }
+    }
 
     let parsed: ParsedBinary =
         parser::parse_file(&cli.binary).context("Failed to parse binary")?;
