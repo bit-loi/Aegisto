@@ -1,16 +1,26 @@
-//! Application state and core logic: file browsing, command handling, and the
-//! static-analysis pipeline behind `:analyze`.
+//! Application state and core logic: file browsing, command handling, the
+//! static-analysis pipeline behind `:analyze`, and the main event loop.
 
 use std::{
     fs,
+    io,
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
-use ratatui::widgets::ListState;
+use anyhow::Result;
+use crossterm::{
+    cursor::Show,
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{backend::CrosstermBackend, widgets::ListState, Terminal};
 
-use crate::format::{format_modified, format_size};
+use crate::analysis::{disasm, parser, strings};
 use crate::types::AnalysisResult;
+use crate::ui::format::{format_modified, format_size};
+use crate::ui::{input, render, splash};
 
 /// Maximum number of instructions to disassemble during `:analyze`.
 const MAX_INSTRUCTIONS: usize = 2000;
@@ -83,10 +93,6 @@ impl App {
             quit: false,
             report: None,
         };
-        app.add_log(format!("📂 Welcome to Aegisto! Root: {}", current_dir.display()));
-        app.add_log("🔍 Press ':' to enter command mode.".to_string());
-        app.add_log("📌 Navigate with ↑/↓, Enter to open/select.".to_string());
-        app.add_log("❓ Press '?' anytime for the command menu.".to_string());
         app.load_directory(current_dir);
         app
     }
@@ -134,31 +140,31 @@ impl App {
 
     pub(crate) fn update_info_panel(&mut self) {
         let Some(file) = &self.selected_file else {
-            self.info_lines = vec!["📭 No file selected.".to_string()];
+            self.info_lines = vec!["no file selected.".to_string()];
             return;
         };
 
         let mut lines = vec![
-            format!("📄 {}", file.name),
-            format!("📁 Path: {}", file.path.display()),
-            format!("📦 Size: {} ({} bytes)", format_size(file.size), file.size),
-            format!("🕒 Modified: {}", format_modified(file.modified)),
-            format!("📂 Type: {}", if file.is_dir { "Folder" } else { "File" }),
+            file.name.clone(),
+            format!("Path: {}", file.path.display()),
+            format!("Size: {} ({} bytes)", format_size(file.size), file.size),
+            format!("Modified: {}", format_modified(file.modified)),
+            format!("Type: {}", if file.is_dir { "folder" } else { "file" }),
         ];
         if !file.is_dir {
             if let Some(ext) = file.path.extension() {
-                lines.push(format!("🔖 Extension: {}", ext.to_string_lossy()));
+                lines.push(format!("Extension: {}", ext.to_string_lossy()));
             }
         }
-        lines.push("─".repeat(34).to_string());
+        lines.push("─".repeat(34));
         if file.is_dir {
-            lines.push("💡 Enter: open this folder".to_string());
-            lines.push("💡 ':up' → go to parent folder".to_string());
+            lines.push("Enter: open this folder".to_string());
+            lines.push(":up → parent folder".to_string());
         } else {
-            lines.push("💡 ':analyze' → run static analysis".to_string());
-            lines.push("💡 ':export' → save report.json".to_string());
+            lines.push(":analyze → run static analysis".to_string());
+            lines.push(":export → save report.json".to_string());
         }
-        lines.push("❓ '?' → command menu".to_string());
+        lines.push("? → command menu".to_string());
         self.info_lines = lines;
     }
 
@@ -175,7 +181,7 @@ impl App {
     pub(crate) fn navigate_to(&mut self, path: PathBuf) {
         if path.is_dir() {
             self.load_directory(path.clone());
-            self.status_message = format!("📂 Opened: {}", path.display());
+            self.status_message = format!("[INFO] opened: {}", path.display());
         } else if path.is_file() {
             // Jump to the file's parent folder and highlight the file itself.
             if let Some(parent) = path.parent() {
@@ -190,9 +196,9 @@ impl App {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            self.status_message = format!("📄 Selected: {}", name);
+            self.status_message = format!("[INFO] selected: {}", name);
         } else {
-            self.status_message = format!("❌ Not found: {}", path.display());
+            self.status_message = format!("[ERR] not found: {}", path.display());
         }
     }
 
@@ -210,20 +216,20 @@ impl App {
 
     pub(crate) fn menu_lines() -> Vec<String> {
         vec![
-            "📋 AEGISTO COMMAND MENU".to_string(),
+            "AEGISTO COMMAND MENU".to_string(),
             "────────────────────────────────".to_string(),
-            "  :analyze      Analyze selected file".to_string(),
-            "  :cd <path>    Change directory".to_string(),
-            "  :up           Go to parent folder".to_string(),
-            "  :home         Go to project root".to_string(),
-            "  :refresh      Reload current folder".to_string(),
-            "  :export       Save last report to report.json".to_string(),
-            "  :clear        Clear the log panel".to_string(),
-            "  :help / :menu Show this menu (or press ?)".to_string(),
-            "  :exit / :q    Quit Aegisto".to_string(),
+            "  :analyze      analyze selected file".to_string(),
+            "  :cd <path>    change directory".to_string(),
+            "  :up           go to parent folder".to_string(),
+            "  :home         go to project root".to_string(),
+            "  :refresh      reload current folder".to_string(),
+            "  :export       save last report to report.json".to_string(),
+            "  :clear        clear the log panel".to_string(),
+            "  :help / :menu show this menu (or press ?)".to_string(),
+            "  :exit / :q    quit aegisto".to_string(),
             "────────────────────────────────".to_string(),
             "  ↑/↓ navigate · Enter open/select".to_string(),
-            "  Press any key to close this menu".to_string(),
+            "  press any key to close this menu".to_string(),
         ]
     }
 
@@ -235,7 +241,7 @@ impl App {
         } else if let Some(path_str) = cmd.strip_prefix(":cd ") {
             let path_str = path_str.trim();
             if path_str.is_empty() {
-                self.status_message = "Usage: :cd <path>".to_string();
+                self.status_message = "[WARN] usage: :cd <path>".to_string();
                 return;
             }
             let new_path = PathBuf::from(path_str);
@@ -245,7 +251,7 @@ impl App {
                 self.navigate_to(self.current_dir.join(new_path));
             }
         } else if cmd == ":cd" {
-            self.status_message = "Usage: :cd <path>".to_string();
+            self.status_message = "[WARN] usage: :cd <path>".to_string();
         } else if cmd == ":up" {
             self.go_up();
         } else if cmd == ":home" {
@@ -254,19 +260,19 @@ impl App {
             }
         } else if cmd == ":refresh" {
             self.load_directory(self.current_dir.clone());
-            self.status_message = "🔄 Reloaded.".to_string();
+            self.status_message = "[OK] reloaded".to_string();
         } else if cmd == ":export" {
             self.export_report();
         } else if cmd == ":clear" {
             self.info_lines.clear();
-            self.add_log("🧹 Log cleared.".to_string());
-            self.status_message = "🧹 Log cleared.".to_string();
+            self.add_log("[OK] log cleared".to_string());
+            self.status_message = "[OK] log cleared".to_string();
         } else if cmd == ":help" || cmd == ":menu" || cmd == ":?" {
             self.toggle_menu();
         } else if cmd == ":exit" || cmd == ":q" || cmd == ":quit" {
             self.quit = true;
         } else if !cmd.is_empty() {
-            self.status_message = format!("❓ Unknown command: '{}' — type ':help'", cmd);
+            self.status_message = format!("[ERR] unknown command: '{cmd}' — type ':help'");
         }
     }
 
@@ -276,23 +282,23 @@ impl App {
         self.show_menu = false;
 
         let Some(file) = self.selected_file.clone() else {
-            self.status_message = "⚠️ No file selected! Use ↑/↓ first.".to_string();
+            self.status_message = "[WARN] no file selected — use ↑/↓ first".to_string();
             return;
         };
         if file.is_dir {
-            self.status_message = "❌ Cannot analyze a folder!".to_string();
+            self.status_message = "[WARN] cannot analyze a folder".to_string();
             return;
         }
 
-        self.status_message = format!("🚀 Analyzing {} ...", file.name);
-        self.add_log(format!("🔬 === ANALYSIS: {} ===", file.name));
+        self.status_message = format!("[INFO] analyzing {} ...", file.name);
+        self.add_log(format!("=== ANALYSIS: {} ===", file.name));
 
-        match crate::parser::parse_file(&file.path) {
+        match parser::parse_file(&file.path) {
             Ok(parsed) => {
-                self.add_log(format!("📦 Format: {}", parsed.format));
-                self.add_log(format!("🎯 Entry point: {:#x}", parsed.entry_point));
+                self.add_log(format!("Format: {}", parsed.format));
+                self.add_log(format!("Entry point: {:#x}", parsed.entry_point));
 
-                self.add_log(format!("📚 Sections ({}):", parsed.sections.len()));
+                self.add_log(format!("Sections ({}):", parsed.sections.len()));
                 for s in parsed.sections.iter().take(12) {
                     self.add_log(format!(
                         "    {:<16} size={:<#10x} vaddr={:#010x} [{}]",
@@ -303,7 +309,7 @@ impl App {
                     self.add_log(format!("    … +{} more", parsed.sections.len() - 12));
                 }
 
-                self.add_log(format!("🔗 Imports ({}):", parsed.imports.len()));
+                self.add_log(format!("Imports ({}):", parsed.imports.len()));
                 for imp in parsed.imports.iter().take(15) {
                     self.add_log(format!("    {} ({})", imp.name, imp.library));
                 }
@@ -312,15 +318,15 @@ impl App {
                 }
 
                 let raw_bytes = fs::read(&file.path).unwrap_or_default();
-                let extracted = crate::strings::extract_strings(&raw_bytes, 6);
-                self.add_log(format!("📝 Strings extracted: {}", extracted.len()));
+                let extracted = strings::extract_strings(&raw_bytes, 6);
+                self.add_log(format!("Strings extracted: {}", extracted.len()));
 
                 let instructions = match &parsed.executable_section {
                     Some((sec_name, base_va, code_bytes)) => {
-                        match crate::disasm::disassemble(code_bytes, *base_va, MAX_INSTRUCTIONS) {
+                        match disasm::disassemble(code_bytes, *base_va, MAX_INSTRUCTIONS) {
                             Ok(insts) => {
                                 self.add_log(format!(
-                                    "🛠  Disassembled {} instructions from {} @ {:#x}",
+                                    "Disassembled {} instructions from {} @ {:#x}",
                                     insts.len(),
                                     sec_name,
                                     base_va
@@ -337,13 +343,13 @@ impl App {
                                 insts
                             }
                             Err(e) => {
-                                self.add_log(format!("⚠️  Disassembly error: {e}"));
+                                self.add_log(format!("[WARN] disassembly error: {e}"));
                                 Vec::new()
                             }
                         }
                     }
                     None => {
-                        self.add_log("⚠️  No executable section found.".to_string());
+                        self.add_log("[WARN] no executable section found".to_string());
                         Vec::new()
                     }
                 };
@@ -357,37 +363,116 @@ impl App {
                     instructions,
                     strings: extracted,
                 });
-                self.status_message =
-                    "✅ Analysis complete! Type ':export' to save report.json".to_string();
+                self.add_log("[OK] analysis complete — type ':export' for report.json".to_string());
+                self.status_message = "[OK] analysis complete — type ':export' for report.json".to_string();
             }
             Err(e) => {
-                self.add_log(format!("❌ Analysis failed: {e}"));
-                self.status_message = "❌ Analysis failed — is this a valid PE/ELF binary?".to_string();
+                self.add_log(format!("[ERR] analysis failed: {e}"));
+                self.status_message = "[ERR] analysis failed — is this a valid PE/ELF binary?".to_string();
             }
         }
     }
 
     fn export_report(&mut self) {
         let Some(report) = &self.report else {
-            self.status_message = "⚠️  No analysis yet — run ':analyze' first.".to_string();
+            self.status_message = "[WARN] no analysis yet — run ':analyze' first".to_string();
             return;
         };
         let path = self.current_dir.join("report.json");
         match serde_json::to_string_pretty(report) {
             Ok(json) => match fs::write(&path, json) {
                 Ok(()) => {
-                    self.add_log(format!("💾 Report saved to {}", path.display()));
-                    self.status_message = "✅ Report exported.".to_string();
+                    self.add_log(format!("Report saved to {}", path.display()));
+                    self.status_message = "[OK] report exported".to_string();
                 }
                 Err(e) => {
-                    self.status_message = format!("❌ Failed to write report: {e}");
+                    self.status_message = format!("[ERR] failed to write report: {e}");
                 }
             },
             Err(e) => {
-                self.status_message = format!("❌ Serialization error: {e}");
+                self.status_message = format!("[ERR] serialization error: {e}");
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+
+/// Restores the terminal when dropped, so every exit path (including errors
+/// and panics) leaves the user's shell usable. Same pattern as ui/splash.rs.
+struct ScreenGuard;
+
+impl ScreenGuard {
+    fn enter() -> Result<Self> {
+        enable_raw_mode()?;
+        if let Err(e) = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture) {
+            let _ = disable_raw_mode();
+            return Err(e.into());
+        }
+        Ok(Self)
+    }
+}
+
+impl Drop for ScreenGuard {
+    fn drop(&mut self) {
+        let _ = execute!(
+            io::stdout(),
+            Show,
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        );
+        let _ = disable_raw_mode();
+    }
+}
+
+/// Run the TUI: splash, terminal setup and the main event loop.
+pub(crate) fn run() -> Result<()> {
+    // Animated splash (4s, press q to skip; auto-skipped when output is piped).
+    match splash::run()? {
+        splash::SplashOutcome::Aborted => std::process::exit(130),
+        splash::SplashOutcome::Skipped | splash::SplashOutcome::Completed => {}
+    }
+
+    let guard = ScreenGuard::enter()?;
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut app = App::new();
+
+    while !app.quit {
+        // Show/hide the cursor and position it inside the input bar.
+        if app.input_mode {
+            terminal.show_cursor()?;
+            // Borderless input bar: "⟩ " prefix starts at x=0, content on the
+            // row above the footer.
+            let x = 2 + app.input_buffer.chars().count() as u16;
+            let y = terminal.size()?.height.saturating_sub(2);
+            terminal.set_cursor_position((x, y))?;
+        } else {
+            terminal.hide_cursor()?;
+        }
+
+        terminal.draw(|f| render::draw(f, &mut app))?;
+
+        if event::poll(std::time::Duration::from_millis(50))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                if app.input_mode {
+                    input::handle_input_key(&mut app, key);
+                } else {
+                    input::handle_nav_key(&mut app, key);
+                }
+            }
+        }
+    }
+
+    drop(guard); // restore the terminal before printing the farewell
+    println!("Aegisto exited cleanly.");
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -412,14 +497,14 @@ mod tests {
     fn command_clear_empties_log() {
         let mut app = App::new();
         app.execute_command(":clear");
-        assert!(app.info_lines.iter().any(|l| l.contains("Log cleared")));
+        assert!(app.info_lines.iter().any(|l| l.contains("log cleared")));
     }
 
     #[test]
     fn unknown_command_reports_message() {
         let mut app = App::new();
         app.execute_command(":bogus");
-        assert!(app.status_message.contains("Unknown command"));
+        assert!(app.status_message.contains("unknown command"));
     }
 
     #[test]
@@ -436,7 +521,7 @@ mod tests {
         });
         app.analyze_selected();
         assert!(
-            app.status_message.contains("Analysis failed"),
+            app.status_message.contains("analysis failed"),
             "status was: {}",
             app.status_message
         );

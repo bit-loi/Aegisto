@@ -31,7 +31,7 @@ pub(crate) fn handle_nav_key(app: &mut App, key: KeyEvent) {
                             app.navigate_to(file.path.clone());
                         } else {
                             app.status_message =
-                                format!("📄 Selected: {} — type ':analyze'", file.name);
+                                format!("[INFO] selected: {} — type ':analyze'", file.name);
                         }
                     }
                 }
